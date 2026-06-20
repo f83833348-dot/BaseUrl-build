@@ -1,0 +1,74 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (release/debug)'
+        required: true
+        default: 'release'
+      source_type:
+        description: 'Source type (flutter/web)'
+        required: true
+        default: 'flutter'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.event.inputs.source_type }}" = "flutter" ]; then
+            if [ -f "pubspec.yaml" ]; then
+              flutter pub get
+            fi
+          fi
+          if [ -f "package.json" ]; then
+            npm install
+          fi
+      - name: Build APK
+        id: build
+        run: |
+          if [ "${{ github.event.inputs.source_type }}" = "flutter" ]; then
+            if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
+              flutter build apk --release
+            else
+              flutter build apk --debug
+            fi
+            cp build/app/outputs/flutter-apk/*.apk app.apk
+          else
+            if [ -f "webview_config.js" ]; then
+              node webview_config.js
+            fi
+            if [ -d "android" ]; then
+              cd android && ./gradlew assembleRelease
+              cd ..
+              cp android/app/build/outputs/apk/release/*.apk app.apk
+            fi
+          fi
+          echo "apk_path=$(pwd)/app.apk" >> $GITHUB_OUTPUT
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: ${{ steps.build.outputs.apk_path }}
+      - name: Cleanup
+        run: |
+          rm -rf build/ android/ .gradle/
